@@ -1,4 +1,6 @@
-# PUFp-for-OPV-materials
+# PUFp-for-OPV-materials  
+<img width="1099" height="402" alt="image" src="https://github.com/user-attachments/assets/07800e2b-b8f7-4e0b-bbfa-6c68764ceaea" />
+
 1. The code used for use PUFp as input to training ML models (RF, KRR, SVM) with the attached OPV materials dataset
 2. con_smile.py standardizes SMILES.
 3. Get polymer-unit.py, polymer-unit-classify. py and the input file (OPV_exp_data.csv) are placed in the same folder.
