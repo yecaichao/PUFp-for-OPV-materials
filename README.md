@@ -1,3 +1,5 @@
+<img width="1099" height="402" alt="image" src="https://github.com/user-attachments/assets/70645608-88b9-4129-9f66-f270b480d4a9" />
+
 # PUFp for OPV materials
 
 This repository contains a lightweight workflow for polymer-unit recognition,
