@@ -397,6 +397,7 @@ def found_location_in_DataFrame_double(DataFrame,key):
 def structure_DataFrame(c_list,smallest_list,r_list,l_list):
     str_DataFrame=pd.DataFrame(index=np.arange(len(smallest_list)),columns=np.arange(len(c_list)))
     str_DataFrame[:]='n'
+    c_index = {tuple(cp): idx for idx, cp in enumerate(c_list)}
     
     i=0 
     while i < len(smallest_list):
@@ -413,10 +414,10 @@ def structure_DataFrame(c_list,smallest_list,r_list,l_list):
         for u in list_1:
             if len(u)== 2:
                 if u[1] !=c_list[-1][1]:
-                    plus_u=int(c_list.index(u))+1
+                    plus_u=c_index[tuple(u)]+1
                     u_plus=c_list[plus_u]
                     while (u_plus[1]<u[1])and(u_plus[1]!=c_list[-1][1]):
-                        plus_plus_u=c_list.index(u_plus)+1
+                        plus_plus_u=c_index[tuple(u_plus)]+1
                         u_plus=c_list[plus_plus_u]
                     if u_plus[1]<u[1]:
                         list_2.append("n")
@@ -441,12 +442,10 @@ def structure_DataFrame(c_list,smallest_list,r_list,l_list):
 
 def get_cp_data(cp_list0,smallest_r0,str_df0,independent_cp0,bratch_cp0):
     cp_data0={}
-    cp_name_list=[]
     independent_cp1=independent_cp0+bratch_cp0
     for cp in cp_list0:
         if cp not in smallest_r0:
             cp_name=str(cp[0])+"-"+str(cp[1])
-            cp_name_list.append(cp_name)
             cp_data0[cp_name]=[cp]
          
     hang=len(smallest_r0)-1
@@ -462,11 +461,8 @@ def get_cp_data(cp_list0,smallest_r0,str_df0,independent_cp0,bratch_cp0):
                 while (cp_min not in independent_cp1) and (j!=0):
                     j=j-1
                     cp_min=str_df0[j][hang]
-                if cp_min in independent_cp1:
-                    for k,v in cp_data0.items():
-                        if k==cp_name:
-                            if cp_min not in v:
-                                v.append(cp_min)
+                if cp_min in independent_cp1 and cp_min not in cp_data0[cp_name]:
+                    cp_data0[cp_name].append(cp_min)
             lie=lie-1
         hang=hang-1
     return(cp_data0)
@@ -478,7 +474,7 @@ def get_cp_data(cp_list0,smallest_r0,str_df0,independent_cp0,bratch_cp0):
 def pairing(smiles,index_list,l_list,r_list):
  
     i=0
-    cp_ed=[]
+    cp_ed=set()
     c_list=[]
     while i < len(l_list):
         l=l_list[i]
@@ -487,10 +483,9 @@ def pairing(smiles,index_list,l_list,r_list):
             while (r_list[j] < l) or (r_list[j] in cp_ed):
                 j=j+1
         except IndexError:
-            print(smiles)
-            j=j-1
+            raise ValueError(f"Unmatched bracket structure while pairing SMILES: {smiles}")
         r=r_list[j]
-        cp_ed.append(r)
+        cp_ed.add(r)
         cp=[l,r]
         c_list.append(cp)
         i=i+1

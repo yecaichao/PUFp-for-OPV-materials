@@ -1,326 +1,220 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
-
+import argparse
+import csv
+from collections import Counter
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import csv, os
-from collections import Counter
-
-
-# In[2]:
-
-
 from rdkit import Chem
-from rdkit.Chem import AllChem
-#from rdkit.Chem.Draw import IPythonConsole 
-from rdkit.Chem.Draw.MolDrawing import MolDrawing, DrawingOptions 
-from rdkit.Chem import MACCSkeys
-from rdkit.Chem.AtomPairs import Pairs
-
-
-# In[3]:
-
-
-from rdkit import Chem
-from rdkit.Chem import Draw
-
-
-# In[4]:
-
 
 import structure_identity_tool as F
 
 
-# In[5]:
+def normalize_smiles(smiles):
+    return smiles.replace("/", "").replace("\\", "")
 
 
-file=open('test.csv')
-fileReader=csv.reader(file)
-filedata=list(fileReader)
-
-smi_list=[]
-name_list=[]
-for i in filedata:
-
-    if '/'in i[1]:
-        i[1]=i[1].replace('/','')
-    if '\\'in i[1]:
-        i[1]=i[1].replace('\\','')
-    mol=Chem.MolFromSmiles(i[1])
-    if mol:
-        smi=Chem.MolToSmiles(mol)
-        smi_list.append(smi)
-        name_list.append(i[0])
+def detect_name_column(fieldnames):
+    for candidate in ["name", "Name", "No.", "No", "ID", "Compound ID"]:
+        if candidate in fieldnames:
+            return candidate
+    return fieldnames[0]
 
 
-# In[6]:
+def detect_smiles_column(fieldnames):
+    candidates = [col for col in ["smiles", "SMILES", "n(SMILES)", "p(SMILES)"] if col in fieldnames]
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        raise ValueError(
+            "Multiple SMILES columns detected. Please specify one with --smiles-column, "
+            f"for example: {candidates}"
+        )
+    raise ValueError("No supported SMILES column found in the input csv.")
 
 
-ring_total_list=[]
-error_find_independent_str1=[]
-total_neighbor_data={}
-n=0
-while n < len(smi_list):
+def load_input_records(csv_path, name_column=None, smiles_column=None):
+    smi_list = []
+    name_list = []
+    name_counts = Counter()
 
-    smiles=smi_list[n]
-    name=name_list[n] 
-    
-    from_get_bracket_index=F.get_bracket_index(smiles)
-    left_index_list=from_get_bracket_index[0]
-    right_index_list=from_get_bracket_index[1]
-    index_list=from_get_bracket_index[2]
-    
+    with open(csv_path, newline="", encoding="utf-8-sig") as file:
+        reader = csv.DictReader(file)
+        if not reader.fieldnames:
+            raise ValueError("Input csv does not contain a readable header row.")
 
-    cp_list=F.pairing(smiles,index_list,left_index_list,right_index_list)
-    cp_arr=np.array(cp_list)
-    index_arr=np.array(index_list)
-    
-    smallest_r=F.smallest(cp_list,index_arr)
-        
-    str_df=F.structure_DataFrame(cp_list,smallest_r,right_index_list,left_index_list)
+        if name_column is None:
+            name_column = detect_name_column(reader.fieldnames)
+        if smiles_column is None:
+            smiles_column = detect_smiles_column(reader.fieldnames)
 
-    independent_cp_and_dependent_cp=F.rigin_type_classify(cp_list,smiles,smallest_r,str_df)
-    independent_cp=independent_cp_and_dependent_cp[0]
-    dependent_cp=independent_cp_and_dependent_cp[1]
-    bratch=independent_cp_and_dependent_cp[3]
-    bratch_cp=independent_cp_and_dependent_cp[2]
+        for row in reader:
+            name = str(row.get(name_column, "")).strip()
+            smiles = str(row.get(smiles_column, "")).strip()
+            if not name or not smiles:
+                continue
 
-    cp_data=F.get_cp_data(cp_list,smallest_r,str_df,independent_cp,bratch_cp)
+            mol = Chem.MolFromSmiles(normalize_smiles(smiles))
+            if not mol:
+                continue
 
-    find_str=F.find_independent_str(smiles,smallest_r,cp_data,independent_cp,dependent_cp,bratch_cp)
-    string0=find_str[0]
-    index_data=find_str[1]
-    index_cp=find_str[2]
-    index_data0=find_str[3]
-   
-    br={}
-    index_data2={}
-    for k,v in index_data.items():
-        j=v[1]
-        j2=F.add_bracket(j)
-        j3=F.make_smi(j2)
-        j4=F.link_c(j3)
-        br_f=F.bratch_in_string(j4)
-        j5=br_f[0]
-        bratch1=br_f[1]
-        mol=Chem.MolFromSmiles(j5)
-        if mol:
-             j6= Chem.MolToSmiles(mol)
-        br_f2=F.bratch_in_string(j6)
-        j7=br_f2[0]
-        bratch2=bratch1+br_f2[1]
-        br[k]=bratch2
-        v2=[v[0],j7]
-        index_data2[k]=v2
-    make_con_data=F.make_con(index_data2,index_cp,br)
-    index_data3=make_con_data[0]
-    index_data4=F.delete_free_radical_in_index_data(index_data3)
-    index_cp2=make_con_data[1]
-    br2=make_con_data[2]
-    br3=F.bratch_amend(br2)
-    for k,v in index_data4.items():
-        ring_total_list.append(v[1])
-    for k,v in br3.items():
-        v2=[]
-        for j in v:
-            mol=Chem.MolFromSmiles(j)
+            smi_list.append(Chem.MolToSmiles(mol))
+            duplicate_id = name_counts[name]
+            if duplicate_id:
+                name_list.append(f"{name}-{duplicate_id}")
+            else:
+                name_list.append(name)
+            name_counts[name] += 1
+
+    return smi_list, name_list, name_column, smiles_column
+
+
+def build_neighbor_data(smi_list, name_list):
+    ring_total_list = []
+    total_neighbor_data = {}
+
+    for idx, smiles in enumerate(smi_list):
+        name = name_list[idx]
+
+        left_index_list, right_index_list, index_list = F.get_bracket_index(smiles)
+        cp_list = F.pairing(smiles, index_list, left_index_list, right_index_list)
+        index_arr = np.array(index_list)
+        smallest_r = F.smallest(cp_list, index_arr)
+        str_df = F.structure_DataFrame(cp_list, smallest_r, right_index_list, left_index_list)
+
+        independent_cp, dependent_cp, bratch_cp, bratch = F.rigin_type_classify(cp_list, smiles, smallest_r, str_df)
+        cp_data = F.get_cp_data(cp_list, smallest_r, str_df, independent_cp, bratch_cp)
+        _, index_data, index_cp, _ = F.find_independent_str(
+            smiles, smallest_r, cp_data, independent_cp, dependent_cp, bratch_cp
+        )
+
+        br = {}
+        index_data2 = {}
+        for key, value in index_data.items():
+            unit_smiles = value[1]
+            unit_smiles = F.add_bracket(unit_smiles)
+            unit_smiles = F.make_smi(unit_smiles)
+            unit_smiles = F.link_c(unit_smiles)
+            unit_smiles, branch_prefix = F.bratch_in_string(unit_smiles)
+            mol = Chem.MolFromSmiles(unit_smiles)
             if mol:
-                smi=Chem.MolToSmiles(mol)
-                v2.append(smi)
-                ring_total_list.append(smi)
-        br3[k]=v2
-    neighbor_data=F.found_neighbor(br3,str_df,index_data3,index_cp2)
-    neighbor_data2=F.found_end_point_neighbour(smiles,neighbor_data,index_data3) 
-  
-    for k,v in neighbor_data2.items():
-        for k2,v2 in v['right_neighbor'].items():
-            if '[C]'in v2:
-                v2=v2.replace('[C]','C')
-        for k2,v2 in v['left_neighbor'].items():
-            if '[C]'in v2:
-                v2=v2.replace('[C]','C')
-        if '[C]'in v['self']:
-            v['self']=v['self'].replace('[C]','C')
-    total_neighbor_data[name]=neighbor_data2
-    n=n+1
+                unit_smiles = Chem.MolToSmiles(mol)
+            unit_smiles, branch_suffix = F.bratch_in_string(unit_smiles)
+            br[key] = branch_prefix + branch_suffix
+            index_data2[key] = [value[0], unit_smiles]
+
+        index_data3, index_cp2, br2 = F.make_con(index_data2, index_cp, br)
+        index_data4 = F.delete_free_radical_in_index_data(index_data3)
+        br3 = F.bratch_amend(br2)
+
+        for _, value in index_data4.items():
+            ring_total_list.append(value[1])
+
+        for key, branches in br3.items():
+            canonical_branches = []
+            for branch in branches:
+                mol = Chem.MolFromSmiles(branch)
+                if mol:
+                    smiles_branch = Chem.MolToSmiles(mol)
+                    canonical_branches.append(smiles_branch)
+                    ring_total_list.append(smiles_branch)
+            br3[key] = canonical_branches
+
+        neighbor_data = F.found_neighbor(br3, str_df, index_data3, index_cp2)
+        neighbor_data2 = F.found_end_point_neighbour(smiles, neighbor_data, index_data3)
+
+        for _, value in neighbor_data2.items():
+            for neighbor_key, neighbor_value in value["right_neighbor"].items():
+                if "[C]" in neighbor_value:
+                    value["right_neighbor"][neighbor_key] = neighbor_value.replace("[C]", "C")
+            for neighbor_key, neighbor_value in value["left_neighbor"].items():
+                if "[C]" in neighbor_value:
+                    value["left_neighbor"][neighbor_key] = neighbor_value.replace("[C]", "C")
+            if "[C]" in value["self"]:
+                value["self"] = value["self"].replace("[C]", "C")
+
+        total_neighbor_data[name] = neighbor_data2
+
+    ring_total_list2 = list(dict.fromkeys(ring_total_list))
+    return ring_total_list2, total_neighbor_data
 
 
-# In[7]:
+def write_ring_list(ring_total_list, output_dir):
+    pd.DataFrame(np.array(ring_total_list)).to_csv(output_dir / "ring_total_list.csv")
 
 
-ring_total_list2=[]
-for i in set(ring_total_list):
-    ring_total_list2.append(i)
-    
+def build_fingerprint_tables(ring_total_list, total_neighbor_data, name_list, output_dir):
+    ring_index = {ring: idx for idx, ring in enumerate(ring_total_list)}
+    max_nodes = max((len(v) for v in total_neighbor_data.values()), default=0)
+    long = len(ring_total_list)
+
+    one_hot_rows = []
+    number_rows = []
+    adjacent_rows = []
+    node_rows = []
+    index_rows = []
+
+    for name in name_list:
+        data = total_neighbor_data[name]
+
+        one_hot = np.zeros((1, long))
+        counts = np.zeros((1, long))
+        node_matrix = np.zeros((long, max_nodes))
+        adjacent_matrix = np.zeros((max_nodes, max_nodes))
+        index_vector = np.full(max_nodes, "none", dtype=object)
+
+        self_list = list(data.keys())
+        node_to_index = {node_name: idx for idx, node_name in enumerate(self_list)}
+
+        for j, node_name in enumerate(self_list):
+            unit_smiles = data[node_name]["self"]
+            column = ring_index[unit_smiles]
+            one_hot[:, column] = 1
+            counts[:, column] += 1
+            node_matrix[column, j] = 1
+            index_vector[j] = column
+
+        for j, node_name in enumerate(self_list):
+            data2 = data[node_name]
+            for neighbor_name in data2["right_neighbor"].keys():
+                adjacent_matrix[j, node_to_index[neighbor_name]] = 1
+            for neighbor_name in data2["left_neighbor"].keys():
+                adjacent_matrix[j, node_to_index[neighbor_name]] = 1
+
+        one_hot_rows.append(one_hot.tolist()[0])
+        number_rows.append(counts.tolist()[0])
+        adjacent_rows.append(adjacent_matrix.flatten())
+        node_rows.append(node_matrix.flatten())
+        index_rows.append(index_vector)
+
+    pd.DataFrame(np.array(one_hot_rows), index=name_list).to_csv(output_dir / "one_hot.csv")
+    pd.DataFrame(np.array(number_rows), index=name_list).to_csv(output_dir / "number.csv")
+    pd.DataFrame(np.array(adjacent_rows), index=name_list).to_csv(output_dir / "adjacent_matrix.csv")
+    pd.DataFrame(np.array(node_rows), index=name_list).to_csv(output_dir / "node_matrix.csv")
+    pd.DataFrame(index_rows, index=name_list).to_csv(output_dir / "index_data.csv")
 
 
-# In[8]:
+def main(input_csv="OPV_exp_data.csv", name_column=None, smiles_column=None, output_dir="."):
+    output_dir = Path(output_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    smi_list, name_list, resolved_name_column, resolved_smiles_column = load_input_records(
+        input_csv, name_column=name_column, smiles_column=smiles_column
+    )
+    print(f"Using name column: {resolved_name_column}")
+    print(f"Using smiles column: {resolved_smiles_column}")
+    ring_total_list, total_neighbor_data = build_neighbor_data(smi_list, name_list)
+    write_ring_list(ring_total_list, output_dir)
+    build_fingerprint_tables(ring_total_list, total_neighbor_data, name_list, output_dir)
 
 
-ring_arr=np.array(ring_total_list2)
-ring_df=pd.DataFrame(ring_arr)
-ring_df.to_csv('ring_total_list.csv')
-
-
-# In[9]:
-
-
-ring_series=pd.Series(ring_total_list2)
-
-m=0
-for k,v in total_neighbor_data.items():
-    if len(v)>m:
-        m=len(v)
-long=len(ring_series)
-fp_list=[]
-for i in name_list:
-    fp1=np.zeros((1,long))
-    data=total_neighbor_data[i]
-    for k,v in data.items():
-        self=v['self']
-        column=ring_series[ring_series.values==self].index[0]
-        fp1[:,column]=int(1)
-    fp1=fp1.tolist()[0]
-    fp_list.append(fp1)
-
-fp_arr=np.array(fp_list)
-fp_df=pd.DataFrame(fp_arr,index=name_list)
-
-fp_df.to_csv("one_hot.csv")
-
-
-# In[10]:
-
-
-ring_series=pd.Series(ring_total_list2)
-
-m=0
-for k,v in total_neighbor_data.items():
-    if len(v)>m:
-        m=len(v)
-long=len(ring_series)
-fp_list=[]
-for i in name_list:
-
-    fp1=np.zeros((1,long))
-    data=total_neighbor_data[i]
-    for k,v in data.items():
-        self=v['self']
-        column=ring_series[ring_series.values==self].index[0]
-        fp1[:,column]=fp1[:,column]+int(1)
-    fp1=fp1.tolist()[0]
-    fp_list.append(fp1)
-    
-
-fp_arr=np.array(fp_list)
-fp_df=pd.DataFrame(fp_arr,index=name_list)
-
-fp_df.to_csv("number.csv")
-
-
-# In[11]:
-
-
-ring_series=pd.Series(ring_total_list2)
-
-m=0
-for k,v in total_neighbor_data.items():
-    if len(v)>m:
-        m=len(v)
-long=len(ring_series)
-matrix_list=[]
-for i in name_list:
-    data=total_neighbor_data[i]
-    matrix2=np.zeros((m,m))
-    self_list=[]
-    for k,v in data.items():
-        self_list.append(k)
-    j=0
-    while j < len(self_list):
-        k=self_list[j]
-        data2=data[k]
-        for k,v in data2['right_neighbor'].items():
-            index=self_list.index(k)
-            matrix2[j,index]=1
-        for k,v in data2['left_neighbor'].items():
-            index=self_list.index(k)
-            matrix2[j,index]=1
-        j=j+1
-    f_matrix2=matrix2.flatten()
-    matrix_list.append(f_matrix2)
-
-adjacent_matrix=np.array(matrix_list)
-adjacent_matrix_df=pd.DataFrame(adjacent_matrix,index=name_list)
-adjacent_matrix_df.to_csv("adjacent_matrix.csv")
-
-
-# In[12]:
-
-
-ring_series=pd.Series(ring_total_list2)
-m=0
-for k,v in total_neighbor_data.items():
-    if len(v)>m:
-        m=len(v)
-long=len(ring_series)
-node_list=[]
-for i in name_list:
-    
-    matrix1=np.zeros((long,m))
-    data=total_neighbor_data[i]
-    column_list=[]
-    for k,v in data.items():
-        self=v['self']
-        column=ring_series[ring_series.values==self].index[0]
-        column_list.append(column)
-    j=0
-    while j<len(column_list):
-        k=column_list[j]
-        matrix1[k,j]=1
-        j=j+1
-    f_matrix1=matrix1.flatten()
-    node_list.append(f_matrix1)
-    
-node_matrix=np.array(node_list)
-node_matrix_df=pd.DataFrame(node_matrix,index=name_list)
-node_matrix_df.to_csv("node_matrix.csv")
-
-
-# In[13]:
-
-
-ring_series=pd.Series(ring_total_list2)
-
-m=0
-for k,v in total_neighbor_data.items():
-    if len(v)>m:
-        m=len(v)
-long=len(ring_series)
-total_index_list=[]
-for i in name_list:
-    
-    data=total_neighbor_data[i]
-    fp=np.full((1,m),'none')[0]
-    index_list=[]
-    for k,v in data.items():
-        self=v['self']
-        index=ring_series[ring_series.values==self].index[0]
-        index_list.append(index)
-    n=len(index_list)
-    j=0
-    while j<n:
-        fp[j]=index_list[j]
-        j=j+1
-    total_index_list.append(fp)
-index_frame=pd.DataFrame(total_index_list,index=name_list)
-index_frame.to_csv('index_data.csv')
-
-
-# In[ ]:
-
-
-
-
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Generate polymer-unit fingerprints (PUFp) from an input csv.")
+    parser.add_argument("input_csv", nargs="?", default="OPV_exp_data.csv", help="Input csv file.")
+    parser.add_argument("--name-column", default=None, help="Column used as the sample identifier.")
+    parser.add_argument("--smiles-column", default=None, help="Column used as the SMILES source.")
+    parser.add_argument("--output-dir", default=".", help="Directory used to store generated csv files.")
+    args = parser.parse_args()
+    main(args.input_csv, name_column=args.name_column, smiles_column=args.smiles_column, output_dir=args.output_dir)

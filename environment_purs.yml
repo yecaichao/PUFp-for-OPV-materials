@@ -1,0 +1,9 @@
+name: purs-review-py39
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pandas=1.4.4
+  - rdkit=2022.09.5
+  - numpy=1.26.4

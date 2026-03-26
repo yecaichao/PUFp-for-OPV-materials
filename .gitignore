@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+
+ring_total_list.csv
+one_hot.csv
+number.csv
+adjacent_matrix.csv
+node_matrix.csv
+index_data.csv
+ring_df.csv
+type_frame.csv
+
+output_n/
+output_p/
+output/

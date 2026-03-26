@@ -1,59 +1,88 @@
+import argparse
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from numpy import linspace
-import pylab
 from sklearn.model_selection import GridSearchCV
-from sklearn.svm import SVR
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.kernel_ridge import KernelRidge
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
-from sklearn.metrics import mean_absolute_error
-from sklearn.metrics import r2_score
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-data = pd.read_csv("data.csv")
-data.columns
-feature = data.drop(['PCE_max(%)'],axis=1)
-print(feature.columns)
-target = data['PCE_max(%)']
-feature.shape[1]
-print(len(data))
-X_train, X_test, y_train, y_test = train_test_split(feature.values, target.values,test_size=0.2, random_state=111)
-print(len(X_train))
-print(len(X_test))
-param_range = [2,6,8,10,20]
-tuned_parameters = [{'C': param_range, 'gamma': np.logspace(-10, 3, 5)}]
-gs = GridSearchCV(estimator=SVR(kernel='rbf'),
-                  param_grid=tuned_parameters,
-                  cv=10,
-                  n_jobs=30)
-gs = gs.fit(X_train, y_train)
-print(gs.best_params_)
-y_pred = gs.predict(X_train)
-y_pred_test = gs.predict(X_test)
-plt.plot(y_train, y_pred, "o", label="Train")
-plt.plot(y_test, y_pred_test, "o", label="Test")
-X = np.linspace(-2,22,1000)
-y = np.linspace(-2, 22, 1000)
-plt.plot(X, y, "_", linewidth=2)
-plt.xlim(-2,22)
-plt.ylim(-2,22)
-plt.legend()
-plt.xlabel("Experiment PCE%")
-plt.ylabel("Randon Forest PEC%")
-MSE = mean_squared_error(y_train,y_pred)
-RMSE = np.sqrt(mean_squared_error(y_train,y_pred))
-MAE = mean_absolute_error(y_train,y_pred)
-CC = np.corrcoef(y_train,y_pred)[0, 1]
-R2 = r2_score(y_train,y_pred)
-print("MSE: %s \t RMSE: %s\t MAE: %s\t R2: %s\t CC: %s " % (MSE,RMSE, MAE,R2, CC))
-MSE1 = mean_squared_error(y_test,y_pred_test)
-RMSE1 = np.sqrt(mean_squared_error(y_test,y_pred_test))
-MAE1 = mean_absolute_error(y_test,y_pred_test)
-CC = np.corrcoef(y_test,y_pred_test)[0, 1]
-R2 = r2_score(y_test,y_pred_test)
-print("MSE: %s \t RMSE: %s\t MAE: %s\t R2:%s\t CC: %s" % (MSE1,RMSE1, MAE1,R2, CC))
-plt.show()
+from sklearn.svm import SVR
+
+from ml_common import load_feature_target, split_dataset, regression_metrics, print_metrics, plot_predictions
+
+
+def main(
+    feature_csv="output_n/number.csv",
+    target_csv="OPV_exp_data.csv",
+    id_column="No.",
+    target_column="PCE_max(%)",
+    test_size=0.2,
+    random_state=111,
+    cv=5,
+    n_jobs=-1,
+    output_plot=None,
+    quick=False,
+):
+    X, y, ids, feature_names = load_feature_target(feature_csv, target_csv, id_column, target_column)
+    print("Feature columns:", len(feature_names))
+    print("Matched samples:", len(y))
+
+    X_train, X_test, y_train, y_test = split_dataset(X, y, test_size=test_size, random_state=random_state)
+    print("Train size:", len(X_train))
+    print("Test size:", len(X_test))
+
+    pipe_svr = make_pipeline(StandardScaler(), SVR(kernel="rbf"))
+
+    if quick:
+        tuned_parameters = [{
+            "svr__C": [2, 10],
+            "svr__gamma": [1e-4, 1e-2],
+        }]
+    else:
+        tuned_parameters = [{
+            "svr__C": [2, 6, 8, 10, 20],
+            "svr__gamma": np.logspace(-10, 3, 5),
+        }]
+
+    gs = GridSearchCV(
+        estimator=pipe_svr,
+        param_grid=tuned_parameters,
+        cv=cv,
+        n_jobs=n_jobs,
+    )
+    gs = gs.fit(X_train, y_train)
+    print("Best params:", gs.best_params_)
+
+    y_pred_train = gs.predict(X_train)
+    y_pred_test = gs.predict(X_test)
+
+    train_metrics = regression_metrics(y_train, y_pred_train)
+    test_metrics = regression_metrics(y_test, y_pred_test)
+    print_metrics("Train", train_metrics)
+    print_metrics("Test", test_metrics)
+
+    plot_predictions(y_train, y_pred_train, y_test, y_pred_test, "SVR predicted PCE%", output_plot)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train an SVR model on OPV PUFp features.")
+    parser.add_argument("--feature-csv", default="output_n/number.csv")
+    parser.add_argument("--target-csv", default="OPV_exp_data.csv")
+    parser.add_argument("--id-column", default="No.")
+    parser.add_argument("--target-column", default="PCE_max(%)")
+    parser.add_argument("--test-size", type=float, default=0.2)
+    parser.add_argument("--random-state", type=int, default=111)
+    parser.add_argument("--cv", type=int, default=5)
+    parser.add_argument("--n-jobs", type=int, default=-1)
+    parser.add_argument("--output-plot", default=None)
+    parser.add_argument("--quick", action="store_true")
+    args = parser.parse_args()
+    main(
+        feature_csv=args.feature_csv,
+        target_csv=args.target_csv,
+        id_column=args.id_column,
+        target_column=args.target_column,
+        test_size=args.test_size,
+        random_state=args.random_state,
+        cv=args.cv,
+        n_jobs=args.n_jobs,
+        output_plot=args.output_plot,
+        quick=args.quick,
+    )

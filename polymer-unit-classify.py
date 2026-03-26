@@ -1,284 +1,114 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+import argparse
+from pathlib import Path
 
-
-#前面一步生成polymer unit还需要去除自由基
-
-
-# In[1]:
-
-
-import csv,os
-import numpy as np
 import pandas as pd
-import itertools
-import random
 
 
-# In[2]:
+def classify_ring_type(smiles):
+    num_list = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "%"]
+    nums = [ch for ch in smiles if ch in num_list]
+    if len(nums) == 0:
+        return "bratch"
+    if len(nums) == 2:
+        return "single"
+    if len(nums) == 4:
+        return "double"
+    if len(nums) > 4:
+        return "fused"
+    return "unknow"
 
 
-from rdkit import Chem
-from rdkit.Chem import AllChem
-from rdkit.Chem.Draw import IPythonConsole 
-from rdkit.Chem.Draw.MolDrawing import MolDrawing, DrawingOptions 
-from rdkit.Chem import MACCSkeys
-from rdkit.Chem.AtomPairs import Pairs
+def contains_sulfur(smiles):
+    if "s" in smiles:
+        s_num = smiles.count("s")
+        if "se" in smiles:
+            return "YES" if s_num > smiles.count("se") else "NO"
+        return "YES"
+    if "S" in smiles:
+        s_num = smiles.count("S")
+        if "Si" in smiles:
+            return "YES" if s_num > smiles.count("i") else "NO"
+        return "YES"
+    return "NO"
 
 
-# In[3]:
+def yes_no(flag):
+    return "YES" if flag else "NO"
 
 
-#导入数据
-file=open('ring_total_list.csv')
-fileReader=csv.reader(file)
-filedata=list(fileReader)
-arr=np.array(filedata)[1:]
+def type_judge(row):
+    element = []
+    if row["sulfur"] == "YES":
+        element.append("S")
+    if row["nitrogen"] == "YES":
+        element.append("N")
+    if row["fluorine"] == "YES":
+        element.append("F")
+    if row["oxygen"] == "YES":
+        element.append("O")
+    if row["selenium"] == "YES":
+        element.append("se")
+    if row["silicon"] == "YES":
+        element.append("Si")
+    if row["chlorine"] == "YES":
+        element.append("Cl")
+
+    type_name = row["ring_type"]
+    for item in element:
+        type_name = type_name + "-" + item
+    return type_name
 
 
-# In[4]:
+def build_ring_dataframe(ring_total_list_path):
+    ring_smiles = pd.read_csv(ring_total_list_path, index_col=0).iloc[:, 0].astype(str)
+    ring_df = pd.DataFrame({"smiles": ring_smiles})
+    ring_df.index.name = "index"
+
+    ring_df["ring_type"] = ring_df["smiles"].apply(classify_ring_type)
+    ring_df["sulfur"] = ring_df["smiles"].apply(contains_sulfur)
+    ring_df["selenium"] = ring_df["smiles"].apply(lambda x: yes_no("se" in x))
+    ring_df["silicon"] = ring_df["smiles"].apply(lambda x: yes_no("Si" in x))
+    ring_df["oxygen"] = ring_df["smiles"].apply(lambda x: yes_no(("o" in x) or ("O" in x)))
+    ring_df["nitrogen"] = ring_df["smiles"].apply(lambda x: yes_no(("n" in x) or ("N" in x)))
+    ring_df["chlorine"] = ring_df["smiles"].apply(lambda x: yes_no("Cl" in x))
+    ring_df["fluorine"] = ring_df["smiles"].apply(lambda x: yes_no("F" in x))
+    ring_df["polymer_type"] = ring_df.apply(type_judge, axis="columns")
+    return ring_df
 
 
-#建立一个存储polymer_unit性质的DataFrame
-ring_df=pd.DataFrame(arr[:,1],columns=['smiles'])
-ring_df.index.name='index'
+def build_type_frame(index_data_path, ring_df):
+    index_frame = pd.read_csv(index_data_path, index_col=0, dtype=str).fillna("none")
+
+    def map_polymer_type(value):
+        if value == "none":
+            return None
+        return ring_df.loc[int(value), "polymer_type"]
+
+    return index_frame.applymap(map_polymer_type)
 
 
-# In[5]:
+def main(ring_total_list_path="ring_total_list.csv", index_data_path="index_data.csv", output_dir="."):
+    output_dir = Path(output_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if not Path(ring_total_list_path).exists():
+        raise FileNotFoundError(f"Missing required input file: {ring_total_list_path}")
+    if not Path(index_data_path).exists():
+        raise FileNotFoundError(f"Missing required input file: {index_data_path}")
+
+    ring_df = build_ring_dataframe(ring_total_list_path)
+    ring_df.to_csv(output_dir / "ring_df.csv")
+
+    type_frame = build_type_frame(index_data_path, ring_df)
+    type_frame.to_csv(output_dir / "type_frame.csv")
 
 
-#按单环，双环，支链，稠环进行划分
-num_list=['1','2','3','4','5','6','7','8','9','%']
-ring_type=[]
-for i in arr:
-    i=i.tolist()
-    smi=i[1]
-    num=[]
-    for j in smi:
-        if j in num_list:
-            num.append(j)
-    if len(num)==0:
-        ring_type.append('bratch')
-    elif len(num)==2:
-        ring_type.append('single')
-    elif len(num)==4:
-        ring_type.append('double')
-    elif len(num)>4:
-        ring_type.append('fused')
-    else:
-        ring_type.append('unknow')
-
-#给ring_df加上一列‘ring_type’
-ring_df['ring_type']=ring_type
-
-
-# In[6]:
-
-
-#是否含硫
-sulfur=[]
-for i in arr:
-    i=i.tolist()
-    smi=i[1]
-    if 's'in smi:
-        s_num=smi.count('s')
-        if 'se'in smi:
-            se_num=smi.count('se')
-            if s_num>se_num:
-                sulfur.append('YES')
-            elif s_num==se_num:
-                sulfur.append('NO')
-        else:
-            sulfur.append('YES')
-    elif 'S'in smi:
-        S_num=smi.count('S')
-        if 'Si'in smi:
-            Si_num=smi.count('i')
-            if S_num>Si_num:
-                sulfur.append('YES')
-            elif S_num==Si_num:
-                sulfur.append('NO')
-        else:
-            sulfur.append('YES')
-    else:
-        sulfur.append('NO')
-ring_df['sulfur']=sulfur
-
-
-# In[7]:
-
-
-#是否含硒
-selenium=[]
-for i in arr:
-    i=i.tolist()
-    smi=i[1]
-    if 'se'in smi:
-        selenium.append('YES')
-    else:
-        selenium.append('NO')
-ring_df['selenium']=selenium
-
-
-# In[8]:
-
-
-#是否含硅
-silicon=[]
-for i in arr:
-    i=i.tolist()
-    smi=i[1]
-    if 'Si'in smi:
-        silicon.append('YES')
-    else:
-        silicon.append('NO')
-ring_df['silicon']=silicon
-
-
-# In[9]:
-
-
-#是否含氧
-oxygen=[]
-for i in arr:
-    i=i.tolist()
-    smi=i[1]
-    if 'o'in smi:
-        oxygen.append('YES')
-    elif 'O'in smi:
-        oxygen.append('YES')
-    else:
-        oxygen.append('NO')
-ring_df['oxygen']=oxygen
-
-
-# In[10]:
-
-
-#是否含氮
-nitrogen=[]
-for i in arr:
-    i=i.tolist()
-    smi=i[1]
-    if 'n'in smi:
-        nitrogen.append('YES')
-    elif 'N'in smi:
-        nitrogen.append('YES')
-    else:
-        nitrogen.append('NO')
-ring_df['nitrogen']=nitrogen
-
-
-# In[11]:
-
-
-#是否含氯
-chlorine=[]
-for i in arr:
-    i=i.tolist()
-    smi=i[1]
-    if 'Cl'in smi:
-        chlorine.append('YES')
-    else:
-        chlorine.append('NO')
-ring_df['chlorine']=chlorine
-
-
-# In[12]:
-
-
-#是否含氟
-fluorine=[]
-for i in arr:
-    i=i.tolist()
-    smi=i[1]
-    if 'F'in smi:
-        fluorine.append('YES')
-    else:
-        fluorine.append('NO')
-ring_df['fluorine']=fluorine
-
-
-# In[13]:
-
-
-#根据属性进行总体分类
-ring_df['polymer_type']=''
-
-#判断polymer_unit的类型
-def type_judge(x):
-    ring_type=x['ring_type']
-    sulfur=x['sulfur']
-    oxygen=x['oxygen']
-    nitrogen=x['nitrogen']
-    chlorine=x['chlorine']
-    fluorine=x['fluorine']
-    selenium=x['selenium']
-    silicon=x['silicon']
-    SMILES=x['smiles']
-    smiles=SMILES.lower()
-    #判断有哪些元素
-    element=[]
-    if sulfur=='YES':
-        element.append('S')
-    if nitrogen=='YES':
-        element.append('N')
-    if fluorine=='YES':
-        element.append('F')
-    if oxygen=='YES':
-        element.append('O')
-    if selenium=='YES':
-        element.append('se')
-    if silicon=='YES':
-        element.append('Si')
-    if chlorine=='YES':
-        element.append('Cl')
-    long=len(element)
-    type_name=ring_type
-    i=0
-    while i < long:
-        type_name=type_name+'-'+element[i]
-        i=i+1
-
-    return(type_name)
-    
-    
-f = lambda x: type_judge(x)
-
-ring_df['polymer_type']=ring_df.apply(f,axis='columns')
-
-ring_df.to_csv('ring_df.csv')
-
-
-# In[14]:
-
-
-#给数据的polymer_unit分类
-file=open('index_data.csv')
-fileReader=csv.reader(file)
-filedata=list(fileReader)
-arr=np.array(filedata)[1:]
-index_frame=pd.DataFrame(arr[:,1:],index=arr[:,0])
-long=arr.shape[1]-1
-type_frame=pd.DataFrame(index=arr[:,0],columns=np.arange(long))
-data_long=arr.shape[0]
-i=0
-while i<data_long:
-    j=0
-    while j<long:
-        if index_frame[j][i]!='none':
-            num=int(index_frame[j][i])
-            type=ring_df['polymer_type'][num]
-            type_frame[j][i]=type
-        j=j+1
-    i=i+1
-type_frame.to_csv('type_frame.csv')
-
-
-# In[ ]:
-
-
-
-
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Classify polymer units into PUFp categories.")
+    parser.add_argument("--ring-total-list", default="ring_total_list.csv", help="Path to ring_total_list.csv")
+    parser.add_argument("--index-data", default="index_data.csv", help="Path to index_data.csv")
+    parser.add_argument("--output-dir", default=".", help="Directory used to store generated csv files.")
+    args = parser.parse_args()
+    main(args.ring_total_list, args.index_data, args.output_dir)
